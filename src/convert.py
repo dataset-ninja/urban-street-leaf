@@ -1,5 +1,7 @@
 import supervisely as sly
 import os
+import numpy as np
+from cv2 import connectedComponents
 from dataset_tools.convert import unpack_if_archive
 import src.settings as s
 from urllib.parse import unquote, urlparse
@@ -69,17 +71,150 @@ def count_files(path, extension):
 def convert_and_upload_supervisely_project(
     api: sly.Api, workspace_id: int, project_name: str
 ) -> sly.ProjectInfo:
-    ### Function should read local dataset and upload it to Supervisely project, then return project info.###
-    raise NotImplementedError("The converter should be implemented manually.")
 
-    # dataset_path = "/local/path/to/your/dataset" # general way
-    # dataset_path = download_dataset(teamfiles_dir) # for large datasets stored on instance
+    batch_size = 20
 
-    # ... some code here ...
-
-    # sly.logger.info('Deleting temporary app storage files...')
-    # shutil.rmtree(storage_dir)
-
-    # return project
+    classes_path = os.path.join("leaf","VOCdevkit","VOC2012","class_names.txt")
+    images_path = os.path.join("leaf","VOCdevkit","VOC2012","JPEGImages")
+    masks_path = os.path.join("leaf","VOCdevkit","VOC2012","SegmentationClass")
+    split_folder = os.path.join("leaf","VOCdevkit","VOC2012","ImageSets","Segmentation")
+    images_ext = ".jpg"
+    masks_ext = ".png"
 
 
+    def get_unique_colors(img):
+        unique_colors = []
+        img = img.astype(np.int32)
+        h, w = img.shape[:2]
+        colhash = img[:, :, 0] * 256 * 256 + img[:, :, 1] * 256 + img[:, :, 2]
+        unq, unq_inv, unq_cnt = np.unique(colhash, return_inverse=True, return_counts=True)
+        indxs = np.split(np.argsort(unq_inv), np.cumsum(unq_cnt[:-1]))
+        col2indx = {unq[i]: indxs[i][0] for i in range(len(unq))}
+        for col, indx in col2indx.items():
+            if col != 0:
+                unique_colors.append((col // (256**2), (col // 256) % 256, col % 256))
+
+        return unique_colors
+
+
+    def create_ann(image_path):
+        labels = []
+
+        image_name = get_file_name(image_path)
+        class_name = image_name.split("_leaf")[0]
+        class_name = mask_name_to_class_name.get(class_name, class_name)
+        class_name_lower = class_name.lower()
+        class_name_lower_corr = '_'.join(class_name_lower.split(' '))
+        obj_class = meta.get_obj_class(class_name_lower_corr)
+        tags = [sly.Tag(class_tag, value=class_name_lower_corr)]
+
+        mask_path = os.path.join(masks_path, image_name + masks_ext)
+
+        mask_np = sly.imaging.image.read(mask_path)
+        img_height = mask_np.shape[0]
+        img_wight = mask_np.shape[1]
+        unique_colors = get_unique_colors(mask_np)
+        for color in unique_colors:
+            mask = np.all(mask_np == color, axis=2)
+            ret, curr_mask = connectedComponents(mask.astype("uint8"), connectivity=8)
+            for i in range(1, ret):
+                obj_mask = curr_mask == i
+                bitmap = sly.Bitmap(data=obj_mask)
+                if bitmap.area > 100:
+                    label = sly.Label(bitmap, obj_class)
+                    labels.append(label)
+        return sly.Annotation(img_size=(img_height, img_wight), labels=labels, img_tags=tags)
+
+
+    class_name_to_mask_name = {
+        "leaf of Acer palmatum": "Acer palmatum",
+        "leaf of Aesculus chinensis": "Aesculus chinensis",
+        "Aucuba japonica var. variegata": "Aucuba japonica var. variegata",
+        "leaf of Camptotheca acuminata": "Camptotheca acuminata",
+        "leaf of Celtis sinensis": "Celtis sinensis",
+        "leaf of Cinnamomum camphora (Linn) Presl": "Cinnamomum camphora (Linn) Presl",
+        "leaf of Elaeocarpus decipiens": "Elaeocarpus decipiens",
+        "Euonymus japonicus Aureo_marginatus": "Euonymus japonicus Aureo_marginatus",
+        "Euonymus japonicus": "Euonymus japonicus",
+        "leaf of Flowering cherry": "Flowering cherry",
+        "leaf of Ginkgo biloba": "Ginkgo biloba",
+        "leaf of Koelreuteria paniculata": "Koelreuteria paniculata",
+        "leaf of Lagerstroemia indica": "Lagerstroemia indica",
+        "Ligustrum lucidum": "Ligustrum lucidum",
+        "leaf of Liquidambar formosana": "Liquidambar formosana",
+        "leaf of Liriodendron chinense": "Liriodendron chinense",
+        "leaf of Magnolia grandiflora L.": "Magnolia grandiflora L",
+        "leaf of Magnolia liliflora Desr": "Magnolia liliflora Desr",
+        "leaf of Malushalliana": "Malushalliana",
+        "leaf of Michelia chapensis": "Michelia chapensis",
+        "Michelia figo (Lour.) Spreng": "Michelia chapensis",
+        "Nandina domestica": "Nandina domestica",
+        "Nerium oleander L.": "Nerium oleander L.",
+        "leaf of Osmanthus fragrans": "Osmanthus fragrans",
+        "leaf of Photinia serratifolia": "Photinia serratifolia",
+        "Pittosporum tobira":"Pittosporum tobira",
+        "leaf of Platanus": "Platanus",
+        "leaf of Populus L.": "Populus L",
+        "leaf of Prunus cerasifera f. atropurpurea": "Prunus cerasifera f. atropurpurea",
+        "leaf of Prunus persica": "Prunus persica",
+        "Rhododendron pulchrum":"Rhododendron pulchrum",
+        "leaf of Salix babylonica": "Salix babylonica",
+        "leaf of Sapindus saponaria": "Sapindus saponaria",
+        "leaf of Styphnolobium japonicum": "Styphnolobium japonicum",
+        "leaf of Triadica sebifera": "Triadica sebifera",
+        "Viburnum odoratissimum":"Viburnum odoratissimum",
+        "leaf of Zelkova serrata": "Zelkova serrata",
+    }
+
+    mask_name_to_class_name = dict((v, k) for k, v in class_name_to_mask_name.items())
+
+    project = api.project.create(workspace_id, project_name, change_name_if_conflict=True)
+    meta = sly.ProjectMeta()
+
+    with open(classes_path) as f:
+        content = f.read().split("\n")
+
+        for idx, class_name in enumerate(content):
+            if idx != 0:
+                mask_path = os.path.join(
+                    masks_path, class_name_to_mask_name.get(class_name, class_name) + "_leaf_1 (1).png"
+                )
+                mask_np = sly.imaging.image.read(mask_path)
+                unique_colors = get_unique_colors(mask_np)
+                class_name_lower = class_name.lower()
+                class_name_lower_corr = '_'.join(class_name_lower.split(' '))
+                obj_class = sly.ObjClass(class_name_lower_corr, sly.Bitmap, color=unique_colors[0])
+                meta = meta.add_obj_class(obj_class)
+
+    tag_metas= []
+    class_tag = sly.TagMeta(name="classification tag",value_type=sly.TagValueType.ANY_STRING)
+    tag_metas.append(class_tag)
+    meta = meta.add_tag_metas(tag_metas)
+    api.project.update_meta(project.id, meta.to_json())
+
+
+    for split_file in os.listdir(split_folder):
+        ds_name = get_file_name(split_file)
+        dataset = api.dataset.create(project.id, ds_name, change_name_if_conflict=True)
+        split_path = os.path.join(split_folder, split_file)
+
+        with open(split_path) as f:
+            content = f.read().split("\n")
+            images_names = [im_name + images_ext for im_name in content if len(im_name) > 0]
+
+        progress = sly.Progress("Create dataset {}".format(ds_name), len(images_names))
+
+        for img_names_batch in sly.batched(images_names, batch_size=batch_size):
+            images_pathes_batch = [
+                os.path.join(images_path, image_name) for image_name in img_names_batch
+            ]
+
+            img_infos = api.image.upload_paths(dataset.id, img_names_batch, images_pathes_batch)
+            img_ids = [im_info.id for im_info in img_infos]
+
+            anns_batch = [create_ann(image_path) for image_path in images_pathes_batch]
+            api.annotation.upload_anns(img_ids, anns_batch)
+
+            progress.iters_done_report(len(img_names_batch))
+
+    return project
