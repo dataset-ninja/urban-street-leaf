@@ -1,6 +1,6 @@
 Dataset **Urban Street: Leaf** can be downloaded in [Supervisely format](https://developer.supervisely.com/api-references/supervisely-annotation-json-format):
 
- [Download](https://www.dropbox.com/scl/fi/3t7dmbi3ic8kz11udqsl5/urban-street-leaf-DatasetNinja.tar?rlkey=93nqxhjinzqcfzgyqatgiez9b&dl=1)
+ [Download](https://assets.supervisely.com/remote/eyJsaW5rIjogImZzOi8vYXNzZXRzLzI3ODFfVXJiYW4gU3RyZWV0OiBMZWFmL3VyYmFuLXN0cmVldDotbGVhZi1EYXRhc2V0TmluamEudGFyIiwgInNpZyI6ICJHZndqdDFkYlF6cXd1dmlHWkNIa2IrdVNQWXdDbGpZZnBRdnFXRFh4RklvPSJ9)
 
 As an alternative, it can be downloaded with *dataset-tools* package:
 ``` bash
